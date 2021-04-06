@@ -1,3 +1,5 @@
+#define INCLUDE_xTaskGetHandle 1
+
 #include <BleGamepad.h>
 #include "driver/rtc_io.h"
 #include <WiFi.h>
@@ -41,8 +43,8 @@
 #define NBUTTONS 17 //number of defined buttons in button list
 
 //credentials for OTA wifi mode
-#define WIFI_SSID "YOUR AP NAME" //not needed if you do OTA over softAP
-#define WIFI_PWD "YOUR AP PW"
+#define WIFI_SSID "YOUR SSID" //not needed if you do OTA over softAP
+#define WIFI_PWD "YOUR PWD"
 
 //list of buttons to check
 int buttons[] = {R1, R2, R3, L1, L2, L3, BX, BO, BS, BT, START, SELECT, ANALOG, DU, DR, DD, DL};
@@ -53,8 +55,7 @@ bool buttonState[NBUTTONS]; //this array reflects the state of the button after 
 int analogPressedFor;
 int waitCycle;
 
-BleGamepad gamepad = BleGamepad("Supa Dupa Gamepad", "arduino101", 100); //modify this to suit your needs (first parameter is then name of the device, second the manufacturer, third the battery charge state in percent)
-
+BleGamepad gamepad;
 
 //function for OTA update
 //pressing X restarts the controller
@@ -63,7 +64,19 @@ BleGamepad gamepad = BleGamepad("Supa Dupa Gamepad", "arduino101", 100); //modif
 //pressing X while in either of the OTA modes will restart the controller to exit the OTA mode
 void doOta() {
   Serial.println("doing OTA");
-  gamepad.end();
+  //doesnt work because xTeskGetHandle is not included by default and the ble gamepad lib does not save the task handle (why)
+  //so this could cause a crash because the bluetooth server is still running
+  /*
+  TaskHandle_t serverTaskHandle = xTaskGetHandle("server");
+  if (serverTaskHandle != NULL) {
+    Serial.println("ble gamepad allready startet");
+    vTaskDelete(serverTaskHandle);
+    gamepad.end();
+    Serial.println("terminated server task");
+  } else {
+    Serial.println("server task handle could not be found");
+  }
+  */
   Serial.println("waiting for selection");
   while (42) {
     ledcWrite(0, 8191);
@@ -251,12 +264,12 @@ void setup() {
   //debrick
   //this is the first code that should run in case you upload a firmware that crashes the device before you can enter the OTA mode
   //pressing down X and /\ should start the OTA mode on bootup. This includes crash cycles, deep sleep and initial power up
-  pinMode(BX, INPUT_PULLDOWN);
-  pinMode(BT, INPUT_PULLDOWN);
-  if (digitalRead(BX) == HIGH && digitalRead(BT) == HIGH) {
-    doOta();
-  }
-
+  //ledc init and serial init has to be done here or the system will crash
+  
+  //seting up the LED pin for PWM
+  ledcSetup(0, 5000, 13); //channel 0, basefreq 5000, 13 bit depth
+  ledcAttachPin(LED, 0);
+  ledcWrite(0, 0);
   //set pinMode of buttons
   //seting the pulldown manually might be redundant
   for (int i = 0; i < NBUTTONS; i++) {
@@ -264,17 +277,20 @@ void setup() {
     rtc_gpio_pullup_dis((gpio_num_t) buttons[i]);
     rtc_gpio_pulldown_en((gpio_num_t) buttons[i]); //set pin to pulldown, works even in deep sleep (important)
   }
+  Serial.begin(115200);
+  if (digitalRead(BT) == HIGH) {
+    Serial.println("entering brick prevention");
+    doOta();
+  }
+  //-------------------------------------------------------------------
+
+  //initing ble gamepad
+  gamepad = BleGamepad("Supa Dupa Gamepad", "arduino101", 100); //modify this to suit your needs (first parameter is then name of the device, second the manufacturer, third the battery charge state in percent)
+
   pinMode(RX, INPUT);
   pinMode(RY, INPUT);
   pinMode(LX, INPUT);
   pinMode(LY, INPUT);
-
-  //seting up the LED pin for PWM
-  ledcSetup(0, 5000, 13); //channel 0, basefreq 5000, 13 bit depth
-  ledcAttachPin(LED, 0);
-  ledcWrite(0, 0);
-
-  Serial.begin(115200);
 
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1) Serial.println("Back from ze dead!");
   
